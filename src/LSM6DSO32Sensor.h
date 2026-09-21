@@ -2,8 +2,8 @@
  ******************************************************************************
  * @file    LSM6DSO32Sensor.h
  * @author  NG
- * @version V1.0.0
- * @date    Nov. 2025
+ * @version V1.1.0
+ * @date    September 2026
  * @brief   Abstract Class of an LSM6DSO32 Inertial Measurement Unit (IMU) 3 axes
  *          sensor.
  ******************************************************************************
@@ -21,12 +21,29 @@
 #include "SPI.h"
 #include "lsm6dso32_reg.h"
 
+#if (defined(I3C1_BASE) || defined(I3C2_BASE)) && !defined(I3C_SUPPORTED)
+  #define I3C_SUPPORTED
+  #include "I3C.h"
+#endif
+
 /* Defines -------------------------------------------------------------------*/
 /* For compatibility with ESP32 platforms */
 #ifdef ESP32
   #ifndef MSBFIRST
     #define MSBFIRST SPI_MSBFIRST
   #endif
+#endif
+
+#define LSM6DSO32_I2C_BUS                      0U
+#define LSM6DSO32_SPI_4WIRES_BUS               1U
+#define LSM6DSO32_SPI_3WIRES_BUS               2U
+#define LSM6DSO32_I3C_BUS                      3U
+
+#if defined(I3C_SUPPORTED)
+  #define LSM6DSO32_I3C_ADD_L                  0x6AU
+  #define LSM6DSO32_I3C_ADD_H                  0x6BU
+
+  static const uint64_t LSM6DSO32_I3C_PID = 0x0208006C100BULL;
 #endif
 
 #define LSM6DSO32_ACC_SENSITIVITY_FS_4G   0.122f
@@ -85,9 +102,16 @@ class LSM6DSO32Sensor {
   public:
     LSM6DSO32Sensor(TwoWire *i2c, uint8_t address = LSM6DSO32_I2C_ADD_H);
     LSM6DSO32Sensor(SPIClass *spi, int cs_pin, uint32_t spi_speed = 2000000);
-    LSM6DSO32StatusTypeDef begin();
+#if defined(I3C_SUPPORTED)
+    LSM6DSO32Sensor(I3CBus *i3c, uint8_t static_addr7 = 0);
+#endif
+    LSM6DSO32StatusTypeDef begin(uint8_t new_address = 0);
     LSM6DSO32StatusTypeDef end();
     LSM6DSO32StatusTypeDef ReadID(uint8_t *Id);
+#if defined(I3C_SUPPORTED)
+    uint8_t getStaticAddress() const;
+    uint8_t getDynAddress() const;
+#endif
     LSM6DSO32StatusTypeDef Enable_X();
     LSM6DSO32StatusTypeDef Disable_X();
     LSM6DSO32StatusTypeDef Get_X_Sensitivity(float *Sensitivity);
@@ -223,6 +247,14 @@ class LSM6DSO32Sensor {
         return 0;
       }
 
+#if defined(I3C_SUPPORTED)
+      if (dev_i3c) {
+        if (dev_i3c->readRegBuffer(address, RegisterAddr, pBuffer, NumByteToRead) == 0) {
+          return 0;
+        }
+      }
+#endif
+
       return 1;
     }
 
@@ -267,6 +299,14 @@ class LSM6DSO32Sensor {
         return 0;
       }
 
+#if defined(I3C_SUPPORTED)
+      if (dev_i3c) {
+        if (dev_i3c->writeRegBuffer(address, RegisterAddr, pBuffer, NumByteToWrite) == 0) {
+          return 0;
+        }
+      }
+#endif
+
       return 1;
     }
 
@@ -282,11 +322,20 @@ class LSM6DSO32Sensor {
     /* Helper classes. */
     TwoWire *dev_i2c;
     SPIClass *dev_spi;
+#if defined(I3C_SUPPORTED)
+    I3CBus *dev_i3c;
+#endif
+
+    uint32_t bus_type; /*0 means I2C, 1 means SPI 4-Wires, 2 means SPI-3-Wires, 3 means I3C */
 
     /* Configuration */
     uint8_t address;
     int cs_pin;
     uint32_t spi_speed;
+#if defined(I3C_SUPPORTED)
+    uint8_t i3c_static7;
+    uint8_t i3c_dyn7;
+#endif
 
     lsm6dso32_odr_xl_t acc_odr;
     lsm6dso32_odr_g_t gyro_odr;
