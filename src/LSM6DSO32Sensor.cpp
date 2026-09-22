@@ -2,8 +2,8 @@
  ******************************************************************************
  * @file    LSM6DSO32Sensor.cpp
  * @author  NG
- * @version V1.0.0
- * @date    November 2025
+ * @version V1.1.0
+ * @date    September 2026
  * @brief   Implementation of an LSM6DSO32 Inertial Measurement Unit (IMU) 3 axes
  *          sensor.
  ******************************************************************************
@@ -11,7 +11,6 @@
 
 
 /* Includes ------------------------------------------------------------------*/
-
 #include "LSM6DSO32Sensor.h"
 
 
@@ -24,6 +23,10 @@
 LSM6DSO32Sensor::LSM6DSO32Sensor(TwoWire *i2c, uint8_t address) : dev_i2c(i2c), address(address)
 {
   dev_spi = NULL;
+#if defined(I3C_SUPPORTED)
+  dev_i3c = NULL;
+#endif
+  bus_type = LSM6DSO32_I2C_BUS;
   reg_ctx.write_reg = LSM6DSO32_io_write;
   reg_ctx.read_reg = LSM6DSO32_io_read;
   reg_ctx.handle = (void *)this;
@@ -42,16 +45,48 @@ LSM6DSO32Sensor::LSM6DSO32Sensor(SPIClass *spi, int cs_pin, uint32_t spi_speed) 
   reg_ctx.read_reg = LSM6DSO32_io_read;
   reg_ctx.handle = (void *)this;
   dev_i2c = NULL;
+#if defined(I3C_SUPPORTED)
+  dev_i3c = NULL;
+#endif
+  bus_type = LSM6DSO32_SPI_4WIRES_BUS;
   address = 0;
   acc_is_enabled = 0U;
   gyro_is_enabled = 0U;
 }
 
+#if defined(I3C_SUPPORTED)
+/** Constructor
+ * @param i3c object of an helper class which handles the I3C peripheral
+ * @param static_addr7 the I3C static address of the component's instance
+ */
+LSM6DSO32Sensor::LSM6DSO32Sensor(I3CBus *i3c, uint8_t static_addr7) : dev_i3c(i3c), address(static_addr7), i3c_static7(static_addr7), i3c_dyn7(0)
+{
+  reg_ctx.write_reg = LSM6DSO32_io_write;
+  reg_ctx.read_reg = LSM6DSO32_io_read;
+  reg_ctx.handle = (void *)this;
+  dev_i2c = NULL;
+  dev_spi = NULL;
+  bus_type = LSM6DSO32_I3C_BUS;
+  acc_is_enabled = 0U;
+  gyro_is_enabled = 0U;
+}
+
+uint8_t LSM6DSO32Sensor::getStaticAddress() const
+{
+  return i3c_static7;
+}
+
+uint8_t LSM6DSO32Sensor::getDynAddress() const
+{
+  return i3c_dyn7;
+}
+#endif
+
 /**
  * @brief  Configure the sensor in order to be used
  * @retval 0 in case of success, an error code otherwise
  */
-LSM6DSO32StatusTypeDef LSM6DSO32Sensor::begin()
+LSM6DSO32StatusTypeDef LSM6DSO32Sensor::begin(uint8_t new_address)
 {
   if (dev_spi) {
     // Configure CS pin
@@ -64,9 +99,24 @@ LSM6DSO32StatusTypeDef LSM6DSO32Sensor::begin()
     }
   }
 
-  /* Disable I3C */
-  if (lsm6dso32_i3c_disable_set(&reg_ctx, LSM6DSO32_I3C_DISABLE) != LSM6DSO32_OK) {
-    return LSM6DSO32_ERROR;
+#if defined(I3C_SUPPORTED)
+  if (dev_i3c) {
+    uint8_t id = 0;
+    if (new_address < 0x08 || new_address > 0x77) {
+      return LSM6DSO32_ERROR;
+    }
+    address = new_address;
+    i3c_dyn7 = new_address;
+    if (ReadID(&id) != LSM6DSO32_OK || id != LSM6DSO32_ID) {
+      return LSM6DSO32_ERROR;
+    }
+  } else
+#endif
+  {
+    /* Disable I3C */
+    if (lsm6dso32_i3c_disable_set(&reg_ctx, LSM6DSO32_I3C_DISABLE) != LSM6DSO32_OK) {
+      return LSM6DSO32_ERROR;
+    }
   }
 
   /* Enable register address automatically incremented during a multiple byte
